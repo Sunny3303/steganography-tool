@@ -44,25 +44,25 @@ MAGIC_VID = b'STEGV'
 MAGIC_AUD = b'STEGA'
 
 # === IMAGE FUNCTIONS ===
-def hide_data_in_image(input_image, secret_file, output_image, password):
-    with open(secret_file, 'rb') as f:
+def hide_data_in_image(image_path, secret_file_path, output_image_path, password):
+    with open(secret_file_path, 'rb') as f:
         data = f.read()
     encrypted = encrypt_data(MAGIC_IMG + data, password)
     bits = bytes_to_bits(encrypted)
 
-    img = Image.open(input_image).convert("RGB")
+    img = Image.open(image_path).convert("RGB")
     pixels = np.array(img, dtype=np.uint8)
-    flat = pixels.flatten().copy()
+    flat_pixels = pixels.flatten().copy()
 
-    if len(bits) > len(flat):
+    if len(bits) > len(flat_pixels):
         raise ValueError("Data too large for image.")
 
     for i, bit in enumerate(bits):
-        flat[i] = (flat[i] & 0b11111110) | bit
+        flat_pixels[i] = (flat_pixels[i] & 0b11111110) | bit
 
-    new_pixels = flat.reshape(pixels.shape)
+    new_pixels = flat_pixels.reshape(pixels.shape)
     new_img = Image.fromarray(new_pixels.astype(np.uint8))
-    new_img.save(output_image)
+    new_img.save(output_image_path)
 
 def extract_data_from_image(image_path, password):
     img = Image.open(image_path).convert("RGB")
@@ -74,30 +74,33 @@ def extract_data_from_image(image_path, password):
     return decrypted[len(MAGIC_IMG):]
 
 # === VIDEO FUNCTIONS ===
-def hide_data_in_video(input_video, secret_file, output_video, password):
-    with open(secret_file, 'rb') as f:
+def hide_data_in_video(video_path, secret_file_path, output_video_path, password):
+    with open(secret_file_path, 'rb') as f:
         data = f.read()
     encrypted = encrypt_data(MAGIC_VID + data, password)
     bits = bytes_to_bits(encrypted)
     bit_index = 0
 
-    cap = cv2.VideoCapture(input_video)
+    cap = cv2.VideoCapture(video_path)
     fourcc = cv2.VideoWriter_fourcc(*'XVID')
     fps = cap.get(cv2.CAP_PROP_FPS)
-    size = (int(cap.get(3)), int(cap.get(4)))
-    out = cv2.VideoWriter(output_video, fourcc, fps, size)
+    size = (int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)))
+    out = cv2.VideoWriter(output_video_path, fourcc, fps, size)
 
     while cap.isOpened():
         ret, frame = cap.read()
-        if not ret: break
+        if not ret:
+            break
 
-        flat = frame.flatten()
-        for i in range(len(flat)):
-            if bit_index >= len(bits): break
-            flat[i] = (flat[i] & ~1) | bits[bit_index]
+        flat_frame = frame.flatten()
+        for i in range(len(flat_frame)):
+            if bit_index >= len(bits):
+                break
+            flat_frame[i] = (flat_frame[i] & ~1) | bits[bit_index]
             bit_index += 1
 
-        out.write(flat.reshape(frame.shape).astype(np.uint8))
+        new_frame = flat_frame.reshape(frame.shape)
+        out.write(new_frame.astype(np.uint8))
 
     cap.release()
     out.release()
@@ -107,7 +110,8 @@ def extract_data_from_video(video_path, password):
     bits = []
     while cap.isOpened():
         ret, frame = cap.read()
-        if not ret: break
+        if not ret:
+            break
         bits.extend([val & 1 for val in frame.flatten()])
     cap.release()
 
@@ -118,13 +122,13 @@ def extract_data_from_video(video_path, password):
     return decrypted[len(MAGIC_VID):]
 
 # === AUDIO FUNCTIONS ===
-def hide_data_in_audio(input_audio, secret_file, output_audio, password):
-    with open(secret_file, 'rb') as f:
+def hide_data_in_audio(audio_path, secret_file_path, output_audio_path, password):
+    with open(secret_file_path, 'rb') as f:
         data = f.read()
     encrypted = encrypt_data(MAGIC_AUD + data, password)
     bits = bytes_to_bits(encrypted)
 
-    with wave.open(input_audio, 'rb') as wav_in:
+    with wave.open(audio_path, 'rb') as wav_in:
         params = wav_in.getparams()
         frames = np.frombuffer(wav_in.readframes(params.nframes), dtype=np.int16)
 
@@ -134,7 +138,7 @@ def hide_data_in_audio(input_audio, secret_file, output_audio, password):
     for i, bit in enumerate(bits):
         frames[i] = (frames[i] & ~1) | bit
 
-    with wave.open(output_audio, 'wb') as wav_out:
+    with wave.open(output_audio_path, 'wb') as wav_out:
         wav_out.setparams(params)
         wav_out.writeframes(frames.tobytes())
 
@@ -142,98 +146,92 @@ def extract_data_from_audio(audio_path, password):
     with wave.open(audio_path, 'rb') as wav:
         frames = np.frombuffer(wav.readframes(wav.getnframes()), dtype=np.int16)
 
-    bits = [s & 1 for s in frames]
+    bits = [sample & 1 for sample in frames]
     data = bits_to_bytes(bits)
     decrypted = decrypt_data(data, password)
     if not decrypted.startswith(MAGIC_AUD):
         raise ValueError("Invalid password or no data found.")
     return decrypted[len(MAGIC_AUD):]
 
-# === GUI ===
-def browse_file(entry):
+# === GUI FUNCTIONS ===
+def browse_file(entry_widget):
     path = filedialog.askopenfilename()
     if path:
-        entry.delete(0, tk.END)
-        entry.insert(0, path)
+        entry_widget.delete(0, tk.END)
+        entry_widget.insert(0, path)
 
-def browse_save(entry):
+def browse_save(entry_widget):
     path = filedialog.asksaveasfilename()
     if path:
-        entry.delete(0, tk.END)
-        entry.insert(0, path)
+        entry_widget.delete(0, tk.END)
+        entry_widget.insert(0, path)
 
-def browse_folder(entry):
-    path = filedialog.askdirectory()
-    if path:
-        entry.delete(0, tk.END)
-        entry.insert(0, path)
-
-def handle_action(mode):
+def handle_action(action_mode):
     try:
-        media_type = var_media.get()
-        file_path = entry_file.get()
-        media_path = entry_media.get()
-        output_path = entry_output.get()
-        password = entry_password.get()
+        media_type = media_type_var.get()
+        secret_file_path = secret_file_entry.get()
+        media_file_path = media_file_entry.get()
+        output_file_path = output_file_entry.get()
+        password = password_entry.get()
 
-        if mode == "hide":
+        if action_mode == "hide":
             if media_type == "Image":
-                hide_data_in_image(media_path, file_path, output_path, password)
+                hide_data_in_image(media_file_path, secret_file_path, output_file_path, password)
             elif media_type == "Video":
-                hide_data_in_video(media_path, file_path, output_path, password)
+                hide_data_in_video(media_file_path, secret_file_path, output_file_path, password)
             elif media_type == "Audio":
-                hide_data_in_audio(media_path, file_path, output_path, password)
-            messagebox.showinfo("Success", f"✅ Data hidden successfully in {output_path}")
+                hide_data_in_audio(media_file_path, secret_file_path, output_file_path, password)
+            messagebox.showinfo("Success", f"✅ Data hidden successfully in {output_file_path}")
 
-        elif mode == "extract":
+        elif action_mode == "extract":
             if media_type == "Image":
-                data = extract_data_from_image(media_path, password)
+                extracted_data = extract_data_from_image(media_file_path, password)
             elif media_type == "Video":
-                data = extract_data_from_video(media_path, password)
+                extracted_data = extract_data_from_video(media_file_path, password)
             elif media_type == "Audio":
-                data = extract_data_from_audio(media_path, password)
-            with open(output_path, "wb") as f:
-                f.write(data)
-            messagebox.showinfo("Success", f"✅ Data extracted to {output_path}")
+                extracted_data = extract_data_from_audio(media_file_path, password)
+            with open(output_file_path, "wb") as f:
+                f.write(extracted_data)
+            messagebox.showinfo("Success", f"✅ Data extracted to {output_file_path}")
     except Exception as e:
         messagebox.showerror("Error", str(e))
 
-# Tkinter setup
+# === TKINTER SETUP ===
 root = tk.Tk()
 root.title("🔐 Steganography GUI Tool")
 root.geometry("500x400")
 
-var_media = tk.StringVar(value="Image")
+media_type_var = tk.StringVar(value="Image")
 
 # Media Type
 tk.Label(root, text="Media Type:").pack()
-tk.OptionMenu(root, var_media, "Image", "Video", "Audio").pack()
+tk.OptionMenu(root, media_type_var, "Image", "Video", "Audio").pack()
 
 # Media File
 tk.Label(root, text="Media File (Image/Video/Audio):").pack()
-entry_media = tk.Entry(root, width=50)
-entry_media.pack()
-tk.Button(root, text="Browse", command=lambda: browse_file(entry_media)).pack()
+media_file_entry = tk.Entry(root, width=50)
+media_file_entry.pack()
+tk.Button(root, text="Browse", command=lambda: browse_file(media_file_entry)).pack()
 
 # Secret File (for hiding)
 tk.Label(root, text="Secret File to Hide (Only for Hiding):").pack()
-entry_file = tk.Entry(root, width=50)
-entry_file.pack()
-tk.Button(root, text="Browse", command=lambda: browse_file(entry_file)).pack()
+secret_file_entry = tk.Entry(root, width=50)
+secret_file_entry.pack()
+tk.Button(root, text="Browse", command=lambda: browse_file(secret_file_entry)).pack()
 
 # Output File
 tk.Label(root, text="Output File Path:").pack()
-entry_output = tk.Entry(root, width=50)
-entry_output.pack()
-tk.Button(root, text="Save As", command=lambda: browse_save(entry_output)).pack()
+output_file_entry = tk.Entry(root, width=50)
+output_file_entry.pack()
+tk.Button(root, text="Save As", command=lambda: browse_save(output_file_entry)).pack()
 
 # Password
 tk.Label(root, text="Password:").pack()
-entry_password = tk.Entry(root, show="*", width=50)
-entry_password.pack()
+password_entry = tk.Entry(root, show="*", width=50)
+password_entry.pack()
 
+# Buttons
 tk.Button(root, text="Hide Data", bg="lightgreen", command=lambda: handle_action("hide")).pack(pady=10)
 tk.Button(root, text="Extract Data", bg="lightblue", command=lambda: handle_action("extract")).pack(pady=5)
 
-# Run the app
 root.mainloop()
